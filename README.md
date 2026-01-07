@@ -111,6 +111,12 @@ pdfsignluxtrust/
         └── LuxTrustSigner.java # Signer Java avec iText 7
 ```
 
+## Soutenir le projet
+
+Si cette application vous est utile, vous pouvez soutenir son developpement:
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink?logo=github)](https://github.com/sponsors/ceeeeb)
+
 ## Licence
 
 MIT License
