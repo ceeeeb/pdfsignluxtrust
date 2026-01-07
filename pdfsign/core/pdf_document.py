@@ -17,6 +17,16 @@ class PageInfo:
     rotation: int
 
 
+@dataclass
+class SignatureInfo:
+    """Information about an existing signature in the PDF."""
+    field_name: str
+    page: int
+    signer: str
+    signed_on: str
+    is_valid: bool | None  # None if validation not possible
+
+
 class PDFDocument:
     """Wrapper around PyMuPDF for PDF operations."""
 
@@ -191,6 +201,64 @@ class PDFDocument:
 
         page = self._doc[page_num]
         return page.get_text()
+
+    def get_signatures(self) -> list[SignatureInfo]:
+        """
+        Get information about existing digital signatures in the document.
+
+        Returns:
+            List of SignatureInfo objects for each signature found.
+        """
+        if not self._doc:
+            return []
+
+        signatures = []
+
+        for page_num in range(len(self._doc)):
+            page = self._doc[page_num]
+
+            # Get all widgets (form fields) on the page
+            for widget in page.widgets():
+                if widget.field_type == pymupdf.PDF_WIDGET_TYPE_SIGNATURE:
+                    # Extract signature information
+                    field_name = widget.field_name or "Unknown"
+                    signer = ""
+                    signed_on = ""
+
+                    # Try to get signature value/info
+                    try:
+                        # Get the signature field value
+                        sig_value = widget.field_value
+                        if sig_value:
+                            # Parse signer info if available
+                            if isinstance(sig_value, dict):
+                                signer = sig_value.get("Name", "")
+                                signed_on = sig_value.get("M", "")  # Modification date
+                    except Exception:
+                        pass
+
+                    # If no signer from field_value, try field_display
+                    if not signer:
+                        try:
+                            display = widget.field_display or ""
+                            if display:
+                                signer = display
+                        except Exception:
+                            pass
+
+                    signatures.append(SignatureInfo(
+                        field_name=field_name,
+                        page=page_num + 1,  # 1-indexed for display
+                        signer=signer if signer else "Signature numérique",
+                        signed_on=signed_on,
+                        is_valid=None,  # PyMuPDF doesn't validate signatures
+                    ))
+
+        return signatures
+
+    def has_signatures(self) -> bool:
+        """Check if the document contains any digital signatures."""
+        return len(self.get_signatures()) > 0
 
     def __enter__(self):
         return self

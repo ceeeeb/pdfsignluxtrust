@@ -21,6 +21,7 @@ from PySide6.QtGui import QAction, QKeySequence
 
 from pdfsign.core.pdf_document import PDFDocument
 from pdfsign.core.signature_manager import SignatureManager, SignatureConfig, SignatureAppearance
+from pdfsign.utils.settings import save_signature_appearance, load_signature_appearance
 from pdfsign.crypto.pkcs11_manager import PKCS11Manager, PKCS11Error
 from pdfsign.ui.pdf_viewer import PDFViewer
 from pdfsign.ui.dialogs.pin_dialog import TokenSelectionDialog
@@ -39,15 +40,19 @@ class SignatureWorker(QThread):
         signature_manager: SignatureManager,
         input_path: Path,
         output_path: Path,
-        signer,
+        pin: str,
         config: SignatureConfig,
+        alias: str | None = None,
+        slot: int = 0,
     ):
         super().__init__()
         self._manager = signature_manager
         self._input_path = input_path
         self._output_path = output_path
-        self._signer = signer
+        self._pin = pin
         self._config = config
+        self._alias = alias
+        self._slot = slot
 
     def run(self):
         try:
@@ -55,8 +60,10 @@ class SignatureWorker(QThread):
             result = self._manager.sign_pdf(
                 self._input_path,
                 self._output_path,
-                self._signer,
+                self._pin,
                 self._config,
+                self._alias,
+                self._slot,
             )
             self.finished.emit(result)
         except Exception as e:
@@ -73,7 +80,10 @@ class MainWindow(QMainWindow):
         self._signature_manager = SignatureManager()
         self._pkcs11_manager: PKCS11Manager | None = None
         self._current_file: Path | None = None
-        self._signature_appearance = SignatureAppearance()
+
+        # Load saved signature appearance or use default
+        saved_appearance = load_signature_appearance()
+        self._signature_appearance = saved_appearance if saved_appearance else SignatureAppearance()
 
         self.setWindowTitle("PDF Signer - LuxTrust")
         self.setMinimumSize(900, 700)
@@ -250,12 +260,41 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"PDF Signer - {path.name}")
             self._status_label.setText(f"Ouvert: {path.name}")
 
+            # Check for existing signatures
+            self._check_existing_signatures()
+
         except Exception as e:
             QMessageBox.critical(
                 self,
                 "Erreur",
                 f"Impossible d'ouvrir le fichier:\n{e}"
             )
+
+    def _check_existing_signatures(self) -> None:
+        """Check and notify about existing digital signatures."""
+        signatures = self._document.get_signatures()
+        if not signatures:
+            return
+
+        # Build message with signature details
+        count = len(signatures)
+        if count == 1:
+            title = "Signature numerique detectee"
+            message = "Ce document contient une signature numerique:\n\n"
+        else:
+            title = f"{count} signatures numeriques detectees"
+            message = f"Ce document contient {count} signatures numeriques:\n\n"
+
+        for i, sig in enumerate(signatures, 1):
+            message += f"{i}. {sig.signer}\n"
+            message += f"   Champ: {sig.field_name} (page {sig.page})\n"
+            if sig.signed_on:
+                message += f"   Date: {sig.signed_on}\n"
+            message += "\n"
+
+        message += "Ajouter une nouvelle signature conservera les signatures existantes."
+
+        QMessageBox.information(self, title, message)
 
     def _on_save(self) -> None:
         """Handle save action (not implemented - use Sign instead)."""
@@ -297,7 +336,9 @@ class MainWindow(QMainWindow):
 
         if dialog.exec():
             self._signature_appearance = dialog.get_appearance()
-            self._status_label.setText("Configuration de signature mise a jour")
+            # Save configuration for future sessions
+            save_signature_appearance(self._signature_appearance)
+            self._status_label.setText("Configuration de signature sauvegardee")
 
     def _on_select_token(self) -> None:
         """Open token selection dialog."""
@@ -365,27 +406,18 @@ class MainWindow(QMainWindow):
         if not output_path:
             return
 
-        # Create signer
-        try:
-            signer = self._pkcs11_manager.create_signer_with_pin(
-                slot_id=token.slot_id,
-                pin=pin,
-                cert_label=cert.label,
-                key_id=cert.key_id,
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Erreur",
-                f"Impossible de creer le signataire:\n{e}"
-            )
-            return
-
-        # Create signature config
+        # Create signature config with SignaturePosition from PDFRect
+        # Note: viewer uses 0-indexed pages, PDF signer uses 1-indexed
+        from pdfsign.core.signature_manager import SignaturePosition
+        sig_position = SignaturePosition(
+            page=self._viewer.current_page + 1,
+            x=position.x1,
+            y=position.y1,
+            width=position.width,
+            height=position.height,
+        )
         config = SignatureConfig(
-            position=position,
-            page=self._viewer.current_page,
-            field_name=SignatureManager.generate_unique_field_name(self._current_file),
+            position=sig_position,
             appearance=self._signature_appearance,
         )
 
@@ -399,8 +431,10 @@ class MainWindow(QMainWindow):
             self._signature_manager,
             self._current_file,
             Path(output_path),
-            signer,
+            pin,
             config,
+            alias=cert.label,
+            slot=token.slot_id,
         )
         self._worker.finished.connect(lambda p: self._on_signing_finished(p, progress))
         self._worker.error.connect(lambda e: self._on_signing_error(e, progress))

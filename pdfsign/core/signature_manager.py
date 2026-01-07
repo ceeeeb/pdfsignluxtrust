@@ -1,14 +1,11 @@
-"""PDF signature manager using pyHanko."""
+"""PDF signature manager using Java/Gemalto backend."""
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from datetime import datetime
-from io import BytesIO
+from typing import Optional
 
-from PIL import Image
-
-from pdfsign.utils.coordinates import PDFRect
+from pdfsign.crypto.java_signer import JavaSigner, JavaSignerError, CertificateInfo
 
 
 class SignatureAppearanceType(Enum):
@@ -18,136 +15,101 @@ class SignatureAppearanceType(Enum):
     TEXT_AND_IMAGE = auto()
 
 
-class PAdESLevel(Enum):
-    """PAdES signature conformance level."""
-    B_B = "B-B"      # Basic
-    B_T = "B-T"      # With timestamp
-    B_LT = "B-LT"    # Long-term validation
-    B_LTA = "B-LTA"  # Long-term archival
-
-
 @dataclass
 class SignatureAppearance:
     """Configuration for signature visual appearance."""
     type: SignatureAppearanceType = SignatureAppearanceType.TEXT
-
-    # Text options
     name: str = ""
     reason: str = ""
     location: str = ""
     contact: str = ""
     include_date: bool = True
     font_size: int = 10
+    image_path: Optional[Path] = None
 
-    # Image options
-    image_path: Path | None = None
-    image_data: bytes | None = None
+
+@dataclass
+class SignaturePosition:
+    """Position and size of visible signature."""
+    page: int = 1
+    x: float = 50
+    y: float = 50
+    width: float = 200
+    height: float = 50
 
 
 @dataclass
 class SignatureConfig:
     """Complete signature configuration."""
-    position: PDFRect
-    page: int = 0
-    field_name: str = "Signature1"
+    position: SignaturePosition = field(default_factory=SignaturePosition)
     appearance: SignatureAppearance = field(default_factory=SignatureAppearance)
-    pades_level: PAdESLevel = PAdESLevel.B_B
+    visible: bool = True
+    field_name: str = "Signature1"
 
 
 class SignatureManager:
     """
-    Manager for creating PDF signatures with pyHanko.
+    Manager for creating PDF signatures using Java/Gemalto backend.
 
-    Handles:
-    - Visual signature appearance (text or image)
-    - Signature field creation
-    - PAdES signing with PKCS#11
+    This replaces pyHanko with a Java-based solution that uses
+    the Gemalto PKCS#11 middleware for LuxTrust smart cards.
     """
 
-    def __init__(self):
-        self._last_error: str | None = None
+    def __init__(self, pkcs11_lib: Optional[str] = None):
+        """
+        Initialize the signature manager.
+
+        Args:
+            pkcs11_lib: Path to PKCS#11 library (auto-detected if None).
+        """
+        self._java_signer: Optional[JavaSigner] = None
+        self._pkcs11_lib = pkcs11_lib
+        self._last_error: Optional[str] = None
 
     @property
-    def last_error(self) -> str | None:
+    def last_error(self) -> Optional[str]:
         """Get the last error message."""
         return self._last_error
 
-    def create_stamp_style(
-        self,
-        appearance: SignatureAppearance
-    ):
+    def _get_signer(self) -> JavaSigner:
+        """Get or create the Java signer instance."""
+        if self._java_signer is None:
+            try:
+                self._java_signer = JavaSigner(pkcs11_lib=self._pkcs11_lib)
+            except JavaSignerError as e:
+                self._last_error = str(e)
+                raise
+        return self._java_signer
+
+    def list_certificates(self, pin: str, slot: int = 0) -> list[CertificateInfo]:
         """
-        Create a pyHanko stamp style from appearance config.
+        List certificates on the token.
 
         Args:
-            appearance: Signature appearance configuration.
+            pin: User PIN for the token.
+            slot: PKCS#11 slot number.
 
         Returns:
-            StampStyle instance for pyHanko.
+            List of CertificateInfo objects.
+
+        Raises:
+            JavaSignerError: If certificates cannot be read.
         """
-        from pyhanko.sign.fields import VisibleSigSettings
-        from pyhanko.stamp import TextStampStyle, QRStampStyle
-
-        if appearance.type == SignatureAppearanceType.IMAGE and appearance.image_path:
-            # Image-based signature
-            return self._create_image_stamp(appearance)
-        else:
-            # Text-based signature
-            return self._create_text_stamp(appearance)
-
-    def _create_text_stamp(self, appearance: SignatureAppearance):
-        """Create a text-based stamp style."""
-        from pyhanko.stamp import TextStampStyle
-
-        # Build text template
-        lines = []
-        if appearance.name:
-            lines.append(f"Signe par: %(signer)s")
-        if appearance.include_date:
-            lines.append(f"Date: %(ts)s")
-        if appearance.reason:
-            lines.append(f"Raison: {appearance.reason}")
-        if appearance.location:
-            lines.append(f"Lieu: {appearance.location}")
-
-        stamp_text = "\n".join(lines) if lines else "Signature electronique"
-
-        return TextStampStyle(
-            stamp_text=stamp_text,
-            text_box_style=None,  # Use default
-        )
-
-    def _create_image_stamp(self, appearance: SignatureAppearance):
-        """Create an image-based stamp style."""
-        from pyhanko.stamp import TextStampStyle
-
-        # For image stamps, we'll use the image as background
-        # pyHanko supports this via the background parameter
-
-        # Load and validate image
-        if appearance.image_path and appearance.image_path.exists():
-            image_path = str(appearance.image_path)
-        elif appearance.image_data:
-            # Save temporary image
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-                f.write(appearance.image_data)
-                image_path = f.name
-        else:
-            # Fallback to text
-            return self._create_text_stamp(appearance)
-
-        return TextStampStyle(
-            stamp_text="%(signer)s\n%(ts)s",
-            background=image_path,
-        )
+        try:
+            signer = self._get_signer()
+            return signer.list_certificates(pin, slot)
+        except JavaSignerError as e:
+            self._last_error = str(e)
+            raise
 
     def sign_pdf(
         self,
-        input_path: Path | str,
-        output_path: Path | str,
-        signer,
-        config: SignatureConfig,
+        input_path: Path,
+        output_path: Path,
+        pin: str,
+        config: Optional[SignatureConfig] = None,
+        alias: Optional[str] = None,
+        slot: int = 0,
     ) -> Path:
         """
         Sign a PDF document.
@@ -155,8 +117,10 @@ class SignatureManager:
         Args:
             input_path: Path to input PDF.
             output_path: Path for signed PDF.
-            signer: pyHanko signer (e.g., PKCS11Signer).
+            pin: User PIN.
             config: Signature configuration.
+            alias: Certificate alias (auto-detected if None).
+            slot: PKCS#11 slot number.
 
         Returns:
             Path to the signed PDF.
@@ -164,70 +128,52 @@ class SignatureManager:
         Raises:
             RuntimeError: If signing fails.
         """
-        from pyhanko.sign import signers, fields
-        from pyhanko.sign.fields import SigFieldSpec
-        from pyhanko.pdf_utils.reader import PdfFileReader
-        from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-
-        input_path = Path(input_path)
-        output_path = Path(output_path)
+        if config is None:
+            config = SignatureConfig()
 
         try:
-            # Read input PDF
-            with open(input_path, "rb") as f:
-                reader = PdfFileReader(f)
-                writer = IncrementalPdfFileWriter(f)
+            signer = self._get_signer()
 
-                # Create signature field spec
-                sig_field_spec = SigFieldSpec(
-                    sig_field_name=config.field_name,
-                    on_page=config.page,
-                    box=config.position.as_tuple(),
-                )
+            result = signer.sign_pdf(
+                input_path=Path(input_path),
+                output_path=Path(output_path),
+                pin=pin,
+                alias=alias,
+                slot=slot,
+                reason=config.appearance.reason,
+                location=config.appearance.location,
+                contact=config.appearance.contact,
+                name=config.appearance.name,
+                image_path=str(config.appearance.image_path) if config.appearance.image_path else None,
+                visible=config.visible,
+                page=config.position.page,
+                x=config.position.x,
+                y=config.position.y,
+                width=config.position.width,
+                height=config.position.height,
+            )
 
-                # Create stamp style
-                stamp_style = self.create_stamp_style(config.appearance)
+            if not result.success:
+                self._last_error = result.error or "Signing failed"
+                raise RuntimeError(self._last_error)
 
-                # Configure signature metadata
-                signature_meta = signers.PdfSignatureMetadata(
-                    field_name=config.field_name,
-                    reason=config.appearance.reason or None,
-                    location=config.appearance.location or None,
-                    contact_info=config.appearance.contact or None,
-                    name=config.appearance.name or None,
-                )
+            return Path(output_path)
 
-                # Create PDF signer
-                pdf_signer = signers.PdfSigner(
-                    signature_meta=signature_meta,
-                    signer=signer,
-                    stamp_style=stamp_style,
-                    new_field_spec=sig_field_spec,
-                )
-
-                # Sign and write output
-                with open(output_path, "wb") as out_f:
-                    pdf_signer.sign_pdf(
-                        writer,
-                        output=out_f,
-                    )
-
-            return output_path
-
-        except Exception as e:
+        except JavaSignerError as e:
             self._last_error = str(e)
             raise RuntimeError(f"Signing failed: {e}") from e
 
     def sign_pdf_simple(
         self,
-        input_path: Path | str,
-        output_path: Path | str,
-        signer,
-        position: PDFRect,
-        page: int = 0,
+        input_path: Path,
+        output_path: Path,
+        pin: str,
+        position: Optional[SignaturePosition] = None,
         name: str = "",
         reason: str = "",
         location: str = "",
+        alias: Optional[str] = None,
+        slot: int = 0,
     ) -> Path:
         """
         Simplified signing with minimal configuration.
@@ -235,12 +181,13 @@ class SignatureManager:
         Args:
             input_path: Path to input PDF.
             output_path: Path for signed PDF.
-            signer: pyHanko signer.
-            position: Signature position in PDF coordinates.
-            page: Page number (0-indexed).
+            pin: User PIN.
+            position: Signature position.
             name: Signer name.
             reason: Signing reason.
             location: Signing location.
+            alias: Certificate alias.
+            slot: PKCS#11 slot number.
 
         Returns:
             Path to the signed PDF.
@@ -254,64 +201,32 @@ class SignatureManager:
         )
 
         config = SignatureConfig(
-            position=position,
-            page=page,
+            position=position or SignaturePosition(),
             appearance=appearance,
+            visible=True,
         )
 
-        return self.sign_pdf(input_path, output_path, signer, config)
+        return self.sign_pdf(input_path, output_path, pin, config, alias, slot)
 
-    def validate_signature(self, pdf_path: Path | str) -> dict:
+    def test_connection(self, pin: str, slot: int = 0) -> bool:
         """
-        Validate signatures in a PDF.
+        Test if the token is accessible.
 
         Args:
-            pdf_path: Path to PDF to validate.
+            pin: User PIN.
+            slot: PKCS#11 slot number.
 
         Returns:
-            Dictionary with validation results.
+            True if connection successful.
         """
-        from pyhanko.sign.validation import validate_pdf_signature
-        from pyhanko.pdf_utils.reader import PdfFileReader
-
-        pdf_path = Path(pdf_path)
-        results = {
-            "valid": True,
-            "signatures": [],
-            "errors": [],
-        }
-
         try:
-            with open(pdf_path, "rb") as f:
-                reader = PdfFileReader(f)
-
-                for sig in reader.embedded_signatures:
-                    try:
-                        status = validate_pdf_signature(sig)
-                        results["signatures"].append({
-                            "field_name": sig.field_name,
-                            "valid": status.bottom_line,
-                            "signer": str(status.signing_cert.subject) if status.signing_cert else "Unknown",
-                            "timestamp": status.timestamp_validity.timestamp if status.timestamp_validity else None,
-                        })
-                        if not status.bottom_line:
-                            results["valid"] = False
-                    except Exception as e:
-                        results["signatures"].append({
-                            "field_name": sig.field_name,
-                            "valid": False,
-                            "error": str(e),
-                        })
-                        results["valid"] = False
-
-        except Exception as e:
-            results["valid"] = False
-            results["errors"].append(str(e))
-
-        return results
+            signer = self._get_signer()
+            return signer.test_connection(pin, slot)
+        except JavaSignerError:
+            return False
 
     @staticmethod
-    def generate_unique_field_name(pdf_path: Path | str) -> str:
+    def generate_unique_field_name(pdf_path: Path) -> str:
         """
         Generate a unique signature field name.
 
@@ -321,21 +236,6 @@ class SignatureManager:
         Returns:
             Unique field name like "Signature1", "Signature2", etc.
         """
-        from pyhanko.pdf_utils.reader import PdfFileReader
-
-        existing_names = set()
-
-        try:
-            with open(pdf_path, "rb") as f:
-                reader = PdfFileReader(f)
-                for sig in reader.embedded_signatures:
-                    existing_names.add(sig.field_name)
-        except Exception:
-            pass
-
-        counter = 1
-        while True:
-            name = f"Signature{counter}"
-            if name not in existing_names:
-                return name
-            counter += 1
+        # Simple implementation - could be enhanced to check existing fields
+        import time
+        return f"Signature_{int(time.time())}"

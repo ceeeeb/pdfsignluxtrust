@@ -1,0 +1,45 @@
+services:
+  pdfsign:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdfsign-luxtrust
+
+    # X11 display forwarding
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_QPA_PLATFORM=xcb
+      - XDG_RUNTIME_DIR=/tmp/runtime-pdfsigner
+
+    volumes:
+      # X11 socket for GUI display
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${XAUTHORITY:-~/.Xauthority}:/home/pdfsigner/.Xauthority:ro
+
+      # Documents folder for PDFs
+      - ${HOME}/Documents:/home/pdfsigner/Documents:rw
+
+      # Smart card daemon socket
+      - /run/pcscd/pcscd.comm:/run/pcscd/pcscd.comm:rw
+
+      # Gemalto PKCS#11 library (mount from host)
+      - /usr/lib/pkcs11:/usr/lib/pkcs11:ro
+      - /usr/lib/ClassicClient:/usr/lib/ClassicClient:ro
+
+    # USB device access for smart card reader
+    devices:
+      - /dev/bus/usb:/dev/bus/usb:rw
+
+    # Required for smart card access
+    privileged: false
+    security_opt:
+      - seccomp:unconfined
+
+    # Network access (for timestamp servers if needed)
+    network_mode: host
+
+    stdin_open: true
+    tty: true
+
+volumes:
+  pcscd-socket:

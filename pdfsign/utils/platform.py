@@ -27,10 +27,17 @@ LUXTRUST_PATHS = {
         / "lux_p11.dll",
     ],
     "Linux": [
+        # Gemalto middleware (required for LuxTrust cards)
+        Path("/usr/lib/pkcs11/libgclib.so"),
+        Path("/usr/lib/ClassicClient/libgclib.so"),
+        # LuxTrust middleware paths
         Path("/usr/lib/x86_64-linux-gnu/liblux_p11.so"),
         Path("/usr/lib/liblux_p11.so"),
         Path("/opt/LuxTrust/lib/liblux_p11.so"),
         Path("/usr/local/lib/liblux_p11.so"),
+        # OpenSC PKCS#11 (fallback)
+        Path("/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so"),
+        Path("/usr/lib/opensc-pkcs11.so"),
     ],
     "Darwin": [
         Path("/Library/LuxTrust/lib/liblux_p11.dylib"),
