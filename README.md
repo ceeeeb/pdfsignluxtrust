@@ -116,6 +116,7 @@ pdfsignluxtrust/
 Si cette application vous est utile, vous pouvez soutenir son developpement:
 
 [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-pink?logo=github)](https://github.com/sponsors/ceeeeb)
+[![PayPal](https://img.shields.io/badge/Donate-PayPal-blue?logo=paypal)](https://paypal.me/Ceeeeb6566)
 
 ## Licence
 
