@@ -1,6 +1,7 @@
 """Java-based PDF signer using LuxTrust/Gemalto PKCS#11."""
 
 import json
+import os
 import subprocess
 import shutil
 from dataclasses import dataclass
@@ -74,13 +75,16 @@ class JavaSigner:
         """
         self._jar_path = jar_path or self._find_jar()
         self._pkcs11_lib = pkcs11_lib or self._find_pkcs11_lib()
-        self._java_cmd = self._find_java(java_home)
+        self._java_cmd = self._find_java(java_home or os.environ.get("PDFSIGN_JAVA_HOME"))
 
         if not self._jar_path or not self._jar_path.exists():
             raise JavaSignerError(f"JAR not found: {self._jar_path}")
 
     def _find_jar(self) -> Path | None:
         """Find the signer JAR file."""
+        env_path = os.environ.get("PDFSIGN_JAR_PATH")
+        if env_path and Path(env_path).exists():
+            return Path(env_path)
         for path in self.DEFAULT_JAR_PATHS:
             if path.exists():
                 return path
@@ -88,6 +92,9 @@ class JavaSigner:
 
     def _find_pkcs11_lib(self) -> str | None:
         """Find the PKCS#11 library."""
+        env_path = os.environ.get("PDFSIGN_PKCS11_LIB")
+        if env_path and Path(env_path).exists():
+            return env_path
         for path in self.DEFAULT_PKCS11_PATHS:
             if Path(path).exists():
                 return path
