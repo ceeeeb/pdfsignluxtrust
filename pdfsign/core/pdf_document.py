@@ -1,9 +1,12 @@
 """PDF document wrapper using PyMuPDF."""
 
+import logging
 from pathlib import Path
 from dataclasses import dataclass
 
 import pymupdf
+
+logger = logging.getLogger(__name__)
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtCore import QByteArray
 
@@ -164,7 +167,7 @@ class PDFDocument:
         self,
         page_num: int,
         zoom: float = 1.0,
-        format: str = "png"
+        image_format: str = "png"
     ) -> bytes:
         """
         Render a page to bytes (PNG or JPEG).
@@ -172,7 +175,7 @@ class PDFDocument:
         Args:
             page_num: Page number (0-indexed).
             zoom: Zoom factor.
-            format: Output format ("png" or "jpeg").
+            image_format: Output format ("png" or "jpeg").
 
         Returns:
             Image data as bytes.
@@ -184,7 +187,7 @@ class PDFDocument:
         mat = pymupdf.Matrix(zoom, zoom)
         pix = page.get_pixmap(matrix=mat)
 
-        return pix.tobytes(format)
+        return pix.tobytes(image_format)
 
     def get_page_text(self, page_num: int) -> str:
         """
@@ -225,26 +228,21 @@ class PDFDocument:
                     signer = ""
                     signed_on = ""
 
-                    # Try to get signature value/info
                     try:
-                        # Get the signature field value
                         sig_value = widget.field_value
-                        if sig_value:
-                            # Parse signer info if available
-                            if isinstance(sig_value, dict):
-                                signer = sig_value.get("Name", "")
-                                signed_on = sig_value.get("M", "")  # Modification date
+                        if sig_value and isinstance(sig_value, dict):
+                            signer = sig_value.get("Name", "")
+                            signed_on = sig_value.get("M", "")
                     except Exception:
-                        pass
+                        logger.debug("Could not read signature value for field %s", field_name)
 
-                    # If no signer from field_value, try field_display
                     if not signer:
                         try:
                             display = widget.field_display or ""
                             if display:
                                 signer = display
                         except Exception:
-                            pass
+                            logger.debug("Could not read display for field %s", field_name)
 
                     signatures.append(SignatureInfo(
                         field_name=field_name,

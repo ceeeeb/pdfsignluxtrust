@@ -177,6 +177,19 @@ class SignatureConfigDialog(QDialog):
             app_type in (SignatureAppearanceType.IMAGE, SignatureAppearanceType.TEXT_AND_IMAGE)
         )
 
+    def _update_image_preview(self, image_path: Path) -> None:
+        """Load and display an image preview scaled to fit."""
+        pixmap = QPixmap(str(image_path))
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                200, 80,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self._preview_label.setPixmap(scaled)
+        else:
+            self._preview_label.setText("Impossible de charger l'image")
+
     def _on_select_image(self) -> None:
         """Handle image selection."""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -191,18 +204,7 @@ class SignatureConfigDialog(QDialog):
             self._image_path_label.setText(self._image_path.name)
             self._image_path_label.setStyleSheet("")
             self._clear_image_btn.setEnabled(True)
-
-            # Load preview
-            pixmap = QPixmap(file_path)
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    200, 80,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self._preview_label.setPixmap(scaled)
-            else:
-                self._preview_label.setText("Impossible de charger l'image")
+            self._update_image_preview(self._image_path)
 
     def _on_clear_image(self) -> None:
         """Clear selected image."""
@@ -263,12 +265,4 @@ class SignatureConfigDialog(QDialog):
             self._image_path = appearance.image_path
             self._image_path_label.setText(appearance.image_path.name)
             self._clear_image_btn.setEnabled(True)
-
-            pixmap = QPixmap(str(appearance.image_path))
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    200, 80,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self._preview_label.setPixmap(scaled)
+            self._update_image_preview(appearance.image_path)

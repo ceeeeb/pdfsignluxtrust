@@ -21,7 +21,7 @@ class PDFRect:
         return self.y2 - self.y1
 
     def as_tuple(self) -> tuple[float, float, float, float]:
-        """Return as (x1, y1, x2, y2) tuple for pyHanko."""
+        """Return as (x1, y1, x2, y2) tuple."""
         return (self.x1, self.y1, self.x2, self.y2)
 
 

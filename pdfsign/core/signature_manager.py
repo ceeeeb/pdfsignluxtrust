@@ -1,9 +1,9 @@
 """PDF signature manager using Java/Gemalto backend."""
 
+import time
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Optional
 
 from pdfsign.crypto.java_signer import JavaSigner, JavaSignerError, CertificateInfo
 
@@ -25,7 +25,7 @@ class SignatureAppearance:
     contact: str = ""
     include_date: bool = True
     font_size: int = 10
-    image_path: Optional[Path] = None
+    image_path: Path | None = None
 
 
 @dataclass
@@ -55,19 +55,19 @@ class SignatureManager:
     the Gemalto PKCS#11 middleware for LuxTrust smart cards.
     """
 
-    def __init__(self, pkcs11_lib: Optional[str] = None):
+    def __init__(self, pkcs11_lib: str | None = None):
         """
         Initialize the signature manager.
 
         Args:
             pkcs11_lib: Path to PKCS#11 library (auto-detected if None).
         """
-        self._java_signer: Optional[JavaSigner] = None
+        self._java_signer: JavaSigner | None = None
         self._pkcs11_lib = pkcs11_lib
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
 
     @property
-    def last_error(self) -> Optional[str]:
+    def last_error(self) -> str | None:
         """Get the last error message."""
         return self._last_error
 
@@ -107,8 +107,8 @@ class SignatureManager:
         input_path: Path,
         output_path: Path,
         pin: str,
-        config: Optional[SignatureConfig] = None,
-        alias: Optional[str] = None,
+        config: SignatureConfig | None = None,
+        alias: str | None = None,
         slot: int = 0,
     ) -> Path:
         """
@@ -168,11 +168,11 @@ class SignatureManager:
         input_path: Path,
         output_path: Path,
         pin: str,
-        position: Optional[SignaturePosition] = None,
+        position: SignaturePosition | None = None,
         name: str = "",
         reason: str = "",
         location: str = "",
-        alias: Optional[str] = None,
+        alias: str | None = None,
         slot: int = 0,
     ) -> Path:
         """
@@ -236,6 +236,4 @@ class SignatureManager:
         Returns:
             Unique field name like "Signature1", "Signature2", etc.
         """
-        # Simple implementation - could be enhanced to check existing fields
-        import time
         return f"Signature_{int(time.time())}"

@@ -20,7 +20,9 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QAction, QKeySequence
 
 from pdfsign.core.pdf_document import PDFDocument
-from pdfsign.core.signature_manager import SignatureManager, SignatureConfig, SignatureAppearance
+from pdfsign.core.signature_manager import (
+    SignatureManager, SignatureConfig, SignatureAppearance, SignaturePosition,
+)
 from pdfsign.utils.settings import save_signature_appearance, load_signature_appearance
 from pdfsign.crypto.pkcs11_manager import PKCS11Manager, PKCS11Error
 from pdfsign.ui.pdf_viewer import PDFViewer
@@ -175,13 +177,6 @@ class MainWindow(QMainWindow):
         self._open_action.triggered.connect(self._on_open)
         toolbar.addAction(self._open_action)
 
-        # Save action
-        self._save_action = QAction("Enregistrer", self)
-        self._save_action.setShortcut(QKeySequence.StandardKey.Save)
-        self._save_action.setEnabled(False)
-        self._save_action.triggered.connect(self._on_save)
-        toolbar.addAction(self._save_action)
-
         toolbar.addSeparator()
 
         # Signature placement
@@ -296,10 +291,6 @@ class MainWindow(QMainWindow):
 
         QMessageBox.information(self, title, message)
 
-    def _on_save(self) -> None:
-        """Handle save action (not implemented - use Sign instead)."""
-        pass
-
     # Navigation
 
     def _on_page_changed(self, page: int) -> None:
@@ -406,9 +397,6 @@ class MainWindow(QMainWindow):
         if not output_path:
             return
 
-        # Create signature config with SignaturePosition from PDFRect
-        # Note: viewer uses 0-indexed pages, PDF signer uses 1-indexed
-        from pdfsign.core.signature_manager import SignaturePosition
         sig_position = SignaturePosition(
             page=self._viewer.current_page + 1,
             x=position.x1,

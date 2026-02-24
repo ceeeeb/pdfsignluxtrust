@@ -5,7 +5,6 @@ import subprocess
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -29,7 +28,7 @@ class SignatureResult:
     output_file: str
     certificate: str
     signer: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class JavaSignerError(Exception):
@@ -45,7 +44,8 @@ class JavaSigner:
     PDF signing capabilities with LuxTrust smart cards.
     """
 
-    # Default paths for the JAR and PKCS#11 library
+    COMMAND_TIMEOUT_SECONDS = 60
+
     DEFAULT_JAR_PATHS = [
         Path(__file__).parent.parent.parent / "java-signer" / "target" / "luxtrust-pdf-signer-1.0.0.jar",
         Path("/app/java-signer/luxtrust-pdf-signer-1.0.0.jar"),
@@ -60,9 +60,9 @@ class JavaSigner:
 
     def __init__(
         self,
-        jar_path: Optional[Path] = None,
-        pkcs11_lib: Optional[str] = None,
-        java_home: Optional[str] = None,
+        jar_path: Path | None = None,
+        pkcs11_lib: str | None = None,
+        java_home: str | None = None,
     ):
         """
         Initialize the Java signer.
@@ -79,21 +79,21 @@ class JavaSigner:
         if not self._jar_path or not self._jar_path.exists():
             raise JavaSignerError(f"JAR not found: {self._jar_path}")
 
-    def _find_jar(self) -> Optional[Path]:
+    def _find_jar(self) -> Path | None:
         """Find the signer JAR file."""
         for path in self.DEFAULT_JAR_PATHS:
             if path.exists():
                 return path
         return None
 
-    def _find_pkcs11_lib(self) -> Optional[str]:
+    def _find_pkcs11_lib(self) -> str | None:
         """Find the PKCS#11 library."""
         for path in self.DEFAULT_PKCS11_PATHS:
             if Path(path).exists():
                 return path
         return None
 
-    def _find_java(self, java_home: Optional[str]) -> str:
+    def _find_java(self, java_home: str | None) -> str:
         """Find the Java executable."""
         if java_home:
             java_cmd = Path(java_home) / "bin" / "java"
@@ -119,7 +119,7 @@ class JavaSigner:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=self.COMMAND_TIMEOUT_SECONDS,
             )
 
             # Parse JSON output
@@ -175,13 +175,13 @@ class JavaSigner:
         input_path: Path,
         output_path: Path,
         pin: str,
-        alias: Optional[str] = None,
+        alias: str | None = None,
         slot: int = 0,
         reason: str = "",
         location: str = "",
         contact: str = "",
         name: str = "",
-        image_path: Optional[str] = None,
+        image_path: str | None = None,
         visible: bool = False,
         page: int = 1,
         x: float = 50,

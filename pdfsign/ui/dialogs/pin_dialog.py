@@ -74,6 +74,7 @@ class TokenSelectionDialog(QDialog):
 
         self._cert_combo = QComboBox()
         self._cert_combo.setEnabled(False)
+        self._cert_combo.currentIndexChanged.connect(self._on_cert_changed)
         cert_layout.addWidget(self._cert_combo)
 
         self._cert_info_label = QLabel()
@@ -176,7 +177,6 @@ class TokenSelectionDialog(QDialog):
                     f"{cert.subject_cn} ({cert.label})"
                 )
 
-            self._cert_combo.currentIndexChanged.connect(self._on_cert_changed)
             self._on_cert_changed(0)
 
         except PKCS11Error as e:

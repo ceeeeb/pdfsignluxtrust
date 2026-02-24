@@ -15,7 +15,7 @@ from PySide6.QtGui import (
 
 from pdfsign.core.pdf_document import PDFDocument
 from pdfsign.ui.signature_rect import SignatureRectItem
-from pdfsign.utils.coordinates import qt_to_pdf_rect, PDFRect
+from pdfsign.utils.coordinates import qt_to_pdf_rect, pdf_to_qt_rect, PDFRect
 
 
 class PDFViewer(QGraphicsView):
@@ -261,8 +261,6 @@ class PDFViewer(QGraphicsView):
         """
         if not self._document:
             return
-
-        from pdfsign.utils.coordinates import pdf_to_qt_rect
 
         page_info = self._document.get_page_info(self._current_page)
         qt_rect = pdf_to_qt_rect(pdf_rect, page_info.height, self._zoom)
