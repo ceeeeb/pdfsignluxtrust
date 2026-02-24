@@ -2,8 +2,11 @@ package lu.pdfsign;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.itextpdf.io.font.constants.StandardFonts;
 import com.itextpdf.io.image.ImageData;
 import com.itextpdf.io.image.ImageDataFactory;
+import com.itextpdf.kernel.font.PdfFont;
+import com.itextpdf.kernel.font.PdfFontFactory;
 import com.itextpdf.kernel.geom.Rectangle;
 import com.itextpdf.kernel.pdf.PdfReader;
 import com.itextpdf.kernel.pdf.StampingProperties;
@@ -391,6 +394,10 @@ public class LuxTrustSigner {
             throw new RuntimeException("Clé privée ou chaîne de certificats non trouvée pour: " + alias);
         }
 
+        // Extract signer name from certificate
+        X509Certificate x509 = (X509Certificate) chain[0];
+        String signerCN = extractCN(x509.getSubjectX500Principal().getName());
+
         // Sign the PDF
         PdfReader reader = new PdfReader(inputFile);
         FileOutputStream fos = new FileOutputStream(outputFile);
@@ -422,35 +429,22 @@ public class LuxTrustSigner {
             appearance.setPageRect(rect);
             appearance.setPageNumber(page);
 
-            // Set image as background (layer 0) if provided
+            // Set signature image via setSignatureGraphic (avoids getLayer0 issues)
+            boolean hasImage = false;
             if (cmd.hasOption("image")) {
                 String imagePath = cmd.getOptionValue("image");
                 File imageFile = new File(imagePath);
                 if (imageFile.exists()) {
                     ImageData imageData = ImageDataFactory.create(imagePath);
-                    // Draw image on layer 0 (background) using PdfFormXObject
-                    com.itextpdf.kernel.pdf.xobject.PdfFormXObject layer0 = appearance.getLayer0();
-                    com.itextpdf.kernel.pdf.canvas.PdfCanvas canvas =
-                        new com.itextpdf.kernel.pdf.canvas.PdfCanvas(layer0, signer.getDocument());
-                    // Scale image to fit the signature rectangle
-                    float imgWidth = imageData.getWidth();
-                    float imgHeight = imageData.getHeight();
-                    float scale = Math.min(width / imgWidth, height / imgHeight);
-                    float scaledWidth = imgWidth * scale;
-                    float scaledHeight = imgHeight * scale;
-                    // Center the image
-                    float xOffset = (width - scaledWidth) / 2;
-                    float yOffset = (height - scaledHeight) / 2;
-                    canvas.addImageFittedIntoRectangle(imageData,
-                        new Rectangle(xOffset, yOffset, scaledWidth, scaledHeight), false);
+                    appearance.setSignatureGraphic(imageData);
+                    hasImage = true;
                 }
             }
 
-            // Build layer 2 text (foreground)
+            // Build visible text - always include signer name from certificate
+            String displayName = cmd.hasOption("name") ? cmd.getOptionValue("name") : signerCN;
             StringBuilder layer2Text = new StringBuilder();
-            if (cmd.hasOption("name")) {
-                layer2Text.append("Signé par: ").append(cmd.getOptionValue("name")).append("\n");
-            }
+            layer2Text.append("Signé par: ").append(displayName).append("\n");
             if (cmd.hasOption("reason")) {
                 layer2Text.append("Raison: ").append(cmd.getOptionValue("reason")).append("\n");
             }
@@ -459,11 +453,20 @@ public class LuxTrustSigner {
             }
             layer2Text.append("Date: ").append(new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm").format(new java.util.Date()));
 
+            PdfFont font = PdfFontFactory.createFont(StandardFonts.HELVETICA);
+            appearance.setLayer2Font(font);
+            appearance.setLayer2FontSize(0); // auto-size to fit rectangle
             appearance.setLayer2Text(layer2Text.toString());
-            appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.DESCRIPTION);
+
+            if (hasImage) {
+                appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.GRAPHIC_AND_DESCRIPTION);
+            } else {
+                appearance.setRenderingMode(PdfSignatureAppearance.RenderingMode.DESCRIPTION);
+            }
         }
 
-        signer.setFieldName("Signature_LuxTrust");
+        // Unique field name to support multiple signatures on the same document
+        signer.setFieldName("Signature_" + System.currentTimeMillis());
 
         // Create signature
         IExternalSignature signature = new PrivateKeySignature(
@@ -480,11 +483,19 @@ public class LuxTrustSigner {
         result.put("input", inputFile);
         result.put("output", outputFile);
         result.put("certificate", alias);
-
-        X509Certificate x509 = (X509Certificate) chain[0];
         result.put("signer", x509.getSubjectX500Principal().getName());
 
         System.out.println(gson.toJson(result));
+    }
+
+    private String extractCN(String dn) {
+        for (String part : dn.split(",")) {
+            String trimmed = part.trim();
+            if (trimmed.toUpperCase().startsWith("CN=")) {
+                return trimmed.substring(3);
+            }
+        }
+        return dn;
     }
 
     private static String toJson(String key, Object value) {
